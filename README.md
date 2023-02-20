@@ -1,5 +1,7 @@
 # exchange-rate-api
 
+A lambda based Flask API which return exchange rate for current tarket curriencies along with difference with previous day.
+
 This project contains source code and supporting files for a serverless application that you can deploy with the SAM CLI.
 
 - exchange_rate - Code for the application's Lambda function.
