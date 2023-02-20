@@ -1,0 +1,116 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  exchange-rate-api
+
+  Exposes a Python Flask API to get exchange rate
+
+Globals:
+  Function:
+    Timeout: 3
+    MemorySize: 128
+    Tracing: Active
+
+
+Resources:
+  ExchangeDb:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: exchange
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema: 
+        - AttributeName: id
+          KeyType: HASH
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+  ExchangeRateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: exchange_rate/
+      Handler: app.app
+      Runtime: python3.9
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName:
+              !Ref ExchangeDb
+      Events:
+        GetExchangeRate:
+          Type: Api
+          Properties:
+            Path: /exchange_rate
+            Method: get
+  UpdateExchangeRateFunction:
+      Type: AWS::Serverless::Function
+      Properties:
+        CodeUri: exchange_rate/
+        Handler: app.lambda_exchange_rate_udpate
+        Runtime: python3.9
+        Policies:
+          - DynamoDBCrudPolicy:
+              TableName:
+                !Ref ExchangeDb
+        Events:
+          GetExchangeRate:
+            Type: Api
+            Properties:
+              Path: /update_exchange_rate
+              Method: get
+  ExchangeRateScheduler:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Description: Executed each day to load latest exchange rate
+      FlexibleTimeWindow:
+        MaximumWindowInMinutes: 5
+        Mode: FLEXIBLE
+      ScheduleExpression: rate(1 day)
+      Target:
+        Arn: !GetAtt UpdateExchangeRateFunction.Arn
+        RoleArn: !GetAtt ExchangeRateSchedulerIAMRole.Arn
+  ExchangeRateSchedulerIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: !Sub scheduler.${AWS::URLSuffix}
+          Action: sts:AssumeRole
+          Condition:
+            ArnLike:
+              aws:SourceArn: !Sub
+                - arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/*/${AWS::StackName}-${ResourceId}-*
+                - ResourceId: ExchangeRateScheduler
+  ApplicationResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name:
+        Fn::Join:
+        - ''
+        - - ApplicationInsights-SAM-
+          - Ref: AWS::StackName
+      ResourceQuery:
+        Type: CLOUDFORMATION_STACK_1_0
+  ApplicationInsightsMonitoring:
+    Type: AWS::ApplicationInsights::Application
+    Properties:
+      ResourceGroupName:
+        Fn::Join:
+        - ''
+        - - ApplicationInsights-SAM-
+          - Ref: AWS::StackName
+      AutoConfigurationEnabled: 'true'
+    DependsOn: ApplicationResourceGroup
+Outputs:
+  ExchangeRateApi:
+    Description: API Gateway endpoint URL for Prod for Exchange Rate API function
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/exchange_rate"
+  ExchangeRateFunction:
+    Description: Exchange Rate API Lambda Function ARN
+    Value: !GetAtt ExchangeRateFunction.Arn
+  ExchangeRateFunctionIamRole:
+    Description: Implicit IAM Role created for Exchange Rate API function
+    Value: !GetAtt ExchangeRateFunctionRole.Arn
